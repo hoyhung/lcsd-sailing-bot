@@ -1,0 +1,31 @@
+name: LCSD Sailing Bot
+
+on:
+  schedule:
+    # 每 30 分鐘自動執行一次 (GitHub Actions 採用 UTC 時間，比香港慢 8 小時)
+    - cron: '*/30 * * * *'
+  workflow_dispatch: # 容許你在 GitHub 網頁上手動點擊執行測試
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run Bot Script
+        env:
+          PHONE_NUMBER: ${{ secrets.PHONE_NUMBER }}
+          CALLMEBOT_API_KEY: ${{ secrets.CALLMEBOT_API_KEY }}
+          UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
+          UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
+        run: node index.js

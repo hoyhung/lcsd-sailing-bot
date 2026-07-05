@@ -1,0 +1,107 @@
+const axios = require('axios');
+const { Redis } = require('@upstash/redis');
+require('dotenv').config();
+
+// 初始化免費的線上 Database，用來跨越 GitHub Actions 關機限制保存記憶
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN,
+});
+
+const showIncomingDateWithQuota = true;
+
+async function checkLcsdOpenData() {
+    console.log(`[${new Date().toLocaleTimeString()}] 開始檢查風帆名額...`);
+    const apiUrl = 'https://data.smartplay.lcsd.gov.hk/rest/cms/api/v1/publ/contents/open-data/activity-prog/file';
+
+    try {
+        const response = await axios.get(apiUrl, { timeout: 30000 });
+        const allActivities = response.data.raw;
+
+        if (!Array.isArray(allActivities)) return;
+
+        const currentDate = new Date();
+        const currentDateOnly = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate());
+
+        // 1. 篩選風帆及日期邏輯
+        const matchedActivities = allActivities.filter(act => {
+            if (act.TC_ACT_TYPE_NAME !== '風帆') return false;
+
+            const ballotEndDateText = act.BALLOT_END_DATE || '';
+            const ballotEndDateMatch = ballotEndDateText.match(/(\d{4})-(\d{2})-(\d{2})/);
+            const ballotEndDate = ballotEndDateMatch 
+                ? new Date(Number(ballotEndDateMatch[1]), Number(ballotEndDateMatch[2]) - 1, Number(ballotEndDateMatch[3])) 
+                : null;
+            
+            const isIncomingDate = ballotEndDate ? ballotEndDate < currentDateOnly : false;
+            const remainingQuota = act.quotaRemaining !== undefined ? act.quotaRemaining : act.PLACES_LEFT;
+            const hasRemainingPlaces = Number(remainingQuota) > 0;
+
+            return !showIncomingDateWithQuota || (isIncomingDate && hasRemainingPlaces);
+        });
+
+        let newAlerts = [];
+        let currentMatchedCodes = [];
+
+        // 2. 核心比對邏輯：逐個活動查詢 Database
+        for (const act of matchedActivities) {
+            const code = act.ACTIVITY_NO;
+            currentMatchedCodes.push(code);
+
+            // 從雲端 Database 讀取上一次的狀態（如果之前通知過，會回傳 "true"）
+            const hasNotifiedBefore = await redis.get(`lcsd:notified:${code}`);
+
+            if (!hasNotifiedBefore) {
+                const remainingQuota = act.quotaRemaining !== undefined ? act.quotaRemaining : act.PLACES_LEFT;
+                newAlerts.push(`⛵ *${act.TC_PGM_NAME}*\n🆔 Code: ${code}\n📍 地點: ${act.TC_VENUE}\n📊 剩餘名額: ${remainingQuota} 個\n📅 抽籤截止: ${act.BALLOT_END_DATE || '無'}\n---`);
+                
+                // 【那一刻通知】將此活動在 Database 標記為 "true"，代表這一波已經通知過，下次不要再發
+                // 設定過期時間為 7 天 (604800 秒)，防止 Database 塞爆
+                await redis.set(`lcsd:notified:${code}`, "true", { ex: 604800 });
+            }
+        }
+
+        // 3. 發送整合後的 WhatsApp
+        if (newAlerts.length > 0) {
+            let messageHeader = `🌟 【康文署風帆班】發現新餘額！\n\n`;
+            let messageBody = ``;
+            for (const alertText of newAlerts) {
+                if ((messageHeader + messageBody + alertText).length > 800) break;
+                messageBody += alertText + '\n';
+            }
+            let finalMessage = messageHeader + messageBody + `\n🔗 快速報名: https://www.smartplay.lcsd.gov.hk/`;
+            await sendWhatsApp(finalMessage);
+        }
+
+        // 4. 清理 Database 狀態：如果之前有位的活動現在從 API 消失了（即名額被搶光，變回 0 位）
+        // 我們就要從 Database 刪除它，這樣下一次它如果再次放位，Bot 才能再次觸發「那一刻通知」
+        // 我們拿到所有在 Redis 記錄為有位的 keys 進行比對
+        const allKeys = await redis.keys('lcsd:notified:*');
+        for (const key of allKeys) {
+            const codeFromKey = key.replace('lcsd:notified:', '');
+            // 如果 Database 裡說它有位，但今天 API 說它沒位了
+            if (!currentMatchedCodes.includes(codeFromKey)) {
+                await redis.del(key);
+            }
+        }
+
+    } catch (error) {
+        console.error('❌ 執行失敗:', error.message);
+    }
+}
+
+async function sendWhatsApp(text) {
+    const phone = process.env.PHONE_NUMBER;
+    const apiKey = process.env.CALLMEBOT_API_KEY;
+    const url = `https://api.callmebot.com/whatsapp.php?phone=${phone}&text=${encodeURIComponent(text)}&apikey=${apiKey}`;
+
+    try {
+        const res = await axios.get(url);
+        if (res.status === 200) console.log('🚀 狀態變更！WhatsApp 提示已發送！');
+    } catch (error) {
+        console.error('❌ CallMeBot 傳送失敗:', error.message);
+    }
+}
+
+// 如果你用 GitHub Actions 定時執行，請把最底的 cron 刪除，讓它純粹執行一次：
+checkLcsdOpenData();
