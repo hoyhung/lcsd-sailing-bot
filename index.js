@@ -4,8 +4,8 @@ require('dotenv').config();
 
 // 初始化免費的線上 Database，用來跨越 GitHub Actions 關機限制保存記憶
 const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN,
+    url: process.env.UPSTASH_REDIS_REST_URL,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
 const showIncomingDateWithQuota = true;
@@ -15,7 +15,19 @@ async function checkLcsdOpenData() {
     const apiUrl = 'https://data.smartplay.lcsd.gov.hk/rest/cms/api/v1/publ/contents/open-data/activity-prog/file';
 
     try {
-        const response = await axios.get(apiUrl, { timeout: 30000 });
+        const response = await axios.get(apiUrl, {
+            timeout: 5000, // 縮短到 5 秒，方便排查
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'application/json, text/plain, */*',
+                'Accept-Language': 'zh-HK,zh;q=0.9,en;q=0.8',
+                'Origin': 'https://www.smartplay.lcsd.gov.hk',
+                'Referer': 'https://www.smartplay.lcsd.gov.hk/'
+            }
+        });
+
+        console.log("✅ Axios 請求成功！收到回應。");
+
         console.log('✅ API 請求完成，開始解析資料');
         const allActivities = response.data.raw;
         console.log(`📦 API 回傳原始資料筆數: ${Array.isArray(allActivities) ? allActivities.length : '非陣列'}`);
@@ -34,10 +46,10 @@ async function checkLcsdOpenData() {
 
             const ballotEndDateText = act.BALLOT_END_DATE || '';
             const ballotEndDateMatch = ballotEndDateText.match(/(\d{4})-(\d{2})-(\d{2})/);
-            const ballotEndDate = ballotEndDateMatch 
-                ? new Date(Number(ballotEndDateMatch[1]), Number(ballotEndDateMatch[2]) - 1, Number(ballotEndDateMatch[3])) 
+            const ballotEndDate = ballotEndDateMatch
+                ? new Date(Number(ballotEndDateMatch[1]), Number(ballotEndDateMatch[2]) - 1, Number(ballotEndDateMatch[3]))
                 : null;
-            
+
             const isIncomingDate = ballotEndDate ? ballotEndDate < currentDateOnly : false;
             const remainingQuota = act.quotaRemaining !== undefined ? act.quotaRemaining : act.PLACES_LEFT;
             const hasRemainingPlaces = Number(remainingQuota) > 0;
@@ -107,9 +119,13 @@ async function checkLcsdOpenData() {
         console.log(`✅ 清理完成，移除 ${removedCount} 筆過期 Redis 紀錄`);
 
     } catch (error) {
-        console.error('❌ 執行失敗:', error.message);
-        if (error.response) {
-            console.error('   HTTP 狀態:', error.response.status, '回傳內容:', error.response.data);
+        console.error("❌ Axios 請求失敗！原因如下：");
+        if (error.code === 'ECONNABORTED') {
+            console.error("👉 錯誤原因：連線超時（Timeout）！康文署伺服器完全沒有回應，極有可能是 GitHub IP 被 LCSD 封鎖了。");
+        } else if (error.response) {
+            console.error(`👉 伺服器回應錯誤碼: ${error.response.status}`);
+        } else {
+            console.error(`👉 其他網絡錯誤: ${error.message}`);
         }
     }
 }
