@@ -26,14 +26,12 @@ async function checkLcsdOpenData() {
             }
         });
 
-        console.log("✅ Axios 請求成功！收到回應。");
-
-        console.log('✅ API 請求完成，開始解析資料', response.data);
+        console.log('✅ API 請求完成，開始解析資料');
         const allActivities = response.data;
         console.log(`📦 API 回傳原始資料筆數: ${Array.isArray(allActivities) ? allActivities.length : '非陣列'}`);
 
         if (!Array.isArray(allActivities)) {
-            console.warn('⚠️ API 回傳資料格式不正確，非陣列，結束本次檢查', allActivities);
+            console.warn('⚠️ API 回傳資料格式不正確，非陣列，結束本次檢查');
             return;
         }
 
