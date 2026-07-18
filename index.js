@@ -42,17 +42,17 @@ async function checkLcsdOpenData() {
         const matchedActivities = allActivities.filter(act => {
             if (act.TC_ACT_TYPE_NAME !== '風帆') return false;
 
-            const ballotEndDateText = act.BALLOT_END_DATE || '';
-            const ballotEndDateMatch = ballotEndDateText.match(/(\d{4})-(\d{2})-(\d{2})/);
-            const ballotEndDate = ballotEndDateMatch
-                ? new Date(Number(ballotEndDateMatch[1]), Number(ballotEndDateMatch[2]) - 1, Number(ballotEndDateMatch[3]))
+            const openEnrolStartDateText = act.OPEN_ENROL_START_DATE || '';
+            const openEnrolStartDateMatch = openEnrolStartDateText.match(/(\d{4})-(\d{2})-(\d{2})/);
+            const openEnrolStartDate = openEnrolStartDateMatch
+                ? new Date(Number(openEnrolStartDateMatch[1]), Number(openEnrolStartDateMatch[2]) - 1, Number(openEnrolStartDateMatch[3]))
                 : null;
 
-            const isIncomingDate = ballotEndDate ? ballotEndDate < currentDateOnly : false;
+            const isOpenEnrolStartDateBeforeToday = openEnrolStartDate ? openEnrolStartDate < currentDateOnly : false;
             const remainingQuota = act.quotaRemaining !== undefined ? act.quotaRemaining : act.PLACES_LEFT;
             const hasRemainingPlaces = Number(remainingQuota) > 0;
 
-            return !showIncomingDateWithQuota || (isIncomingDate && hasRemainingPlaces);
+            return !showIncomingDateWithQuota || (isOpenEnrolStartDateBeforeToday && hasRemainingPlaces);
         });
 
         console.log(`🔎 篩選後的風帆活動筆數: ${matchedActivities.length}`);
@@ -71,7 +71,7 @@ async function checkLcsdOpenData() {
 
             if (!hasNotifiedBefore) {
                 const remainingQuota = act.quotaRemaining !== undefined ? act.quotaRemaining : act.PLACES_LEFT;
-                newAlerts.push(`⛵ *${act.TC_PGM_NAME}*\n🆔 Code: ${code}\n📍 地點: ${act.TC_VENUE}\n📊 剩餘名額: ${remainingQuota} 個\n📅 抽籤截止: ${act.BALLOT_END_DATE || '無'}\n---`);
+                newAlerts.push(`*${act.TC_PGM_NAME}*\nCode: ${code}\n地點: ${act.TC_VENUE}\n日期: ${act.TC_DAY || '無'}\n剩餘名額: ${remainingQuota} 個\n詳情: ${act.TC_URL || '無'}\n---`);
                 console.log(`   ✅ 新的通知活動: ${code}，剩餘名額 ${remainingQuota}`);
 
                 // 【那一刻通知】將此活動在 Database 標記為 "true"，代表這一波已經通知過，下次不要再發
